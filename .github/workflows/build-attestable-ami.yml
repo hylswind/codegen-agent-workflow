@@ -94,31 +94,20 @@ jobs:
           aws s3 cp ami-out/image.raw "s3://${S3_BUCKET}/${key}"
           echo "uri=s3://${S3_BUCKET}/${key}" >> "$GITHUB_OUTPUT"
 
-      - name: Build predicate (spec sha256 + PCRs)
-        run: bash attest/make-predicate.sh spec.md ami-out/pcr_measurements.json > predicate.json
+      - name: Build statement (spec sha256 + PCRs)
+        run: bash attest/make-statement.sh spec.md ami-out/pcr_measurements.json > statement.json
 
-      - name: Sign statement
+      - name: Sign statement (provenance of statement.json)
         id: attest
         uses: actions/attest@v4
         with:
-          subject-path: ami-out/image.raw
-          predicate-type: https://github.com/${{ github.repository }}/attestations/attestable-ami-build/v1
-          predicate-path: predicate.json
+          subject-path: statement.json
 
-      - name: Collect attestation files
-        env:
-          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
-        run: |
-          mkdir attestation
-          cp "$BUNDLE" attestation/attestation.sigstore.json
-          jq -r '.dsseEnvelope.payload' attestation/attestation.sigstore.json | base64 -d | jq . > attestation/statement.json
-          cp predicate.json ami-out/pcr_measurements.json ami-out/image.packages ami-out/kiwi.log spec.md attestation/
-
-      - name: Upload attestation
+      - name: Upload statement
         uses: actions/upload-artifact@v7
         with:
-          name: attestation
-          path: attestation
+          name: statement
+          path: statement.json
 
       - name: Summary
         env:
@@ -126,11 +115,11 @@ jobs:
           ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         run: |
           {
-            echo "- spec sha256: $(jq -r .spec.sha256 predicate.json)"
-            echo "- image sha256: $(sha256sum ami-out/image.raw | cut -d' ' -f1)"
-            echo "- PCR4: $(jq -r .measurements.PCR4 predicate.json)"
-            echo "- PCR7: $(jq -r .measurements.PCR7 predicate.json)"
-            echo "- PCR12: $(jq -r .measurements.PCR12 predicate.json)"
+            echo "- spec sha256: $(jq -r .spec.sha256 statement.json)"
+            echo "- PCR4: $(jq -r .measurements.PCR4 statement.json)"
+            echo "- PCR7: $(jq -r .measurements.PCR7 statement.json)"
+            echo "- PCR12: $(jq -r .measurements.PCR12 statement.json)"
+            echo "- statement sha256: $(sha256sum statement.json | cut -d' ' -f1)"
             echo "- attestation: $ATTESTATION_URL"
             echo "- image: $S3_URI"
           } >> "$GITHUB_STEP_SUMMARY"

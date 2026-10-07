@@ -27,6 +27,7 @@ fi
 
 echo "uploading $image as an EBS snapshot"
 snapshot=$(coldsnap upload --wait --omit-zero-blocks --tag "Key=Name,Value=$name" "$image")
+[[ $snapshot =~ ^snap-[0-9a-f]+$ ]] || { echo "unexpected coldsnap output ($(command -v coldsnap)): $snapshot" >&2; exit 1; }
 echo "snapshot: $snapshot"
 
 ami=$(aws ec2 register-image --name "$name" \

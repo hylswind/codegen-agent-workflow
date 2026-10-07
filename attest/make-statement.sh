@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Print the attestation predicate: the SPEC's sha256 and the image's PCR reference values.
-#   make-predicate.sh <spec.md> <pcr_measurements.json> > predicate.json
+# Print the build-result statement: the SPEC's sha256 and the image's PCR reference values.
+#   make-statement.sh <spec.md> <pcr_measurements.json> > statement.json
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then echo "usage: $0 <spec.md> <pcr_measurements.json>" >&2; exit 2; fi

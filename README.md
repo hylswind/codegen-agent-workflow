@@ -12,8 +12,10 @@ statement binding the two together:
    under `/opt/app` and started by systemd. The build yields the NitroTPM reference measurements
    (PCR4, PCR7, PCR12).
 4. **Upload** the raw image to S3.
-5. **Sign a statement** with GitHub Artifact Attestations: subject = the raw image, predicate =
-   `sha256(spec)` + the PCR values.
+5. **Sign the build-result statement** with GitHub Artifact Attestations: `statement.json` holds
+   `sha256(spec)` + the image's PCR values; GitHub signs its hash and records the provenance
+   (repository, workflow, commit, run) that produced it. The image needs no signature of its own:
+   the PCRs are its identity.
 
 Everything installs the latest version at run time (actions by major tag, `amazonlinux:2023`
 floating tag, unpinned `dnf`/`apt` installs, the agent's own installer), so the workflow does not
@@ -63,10 +65,10 @@ Outputs:
 |---|---|
 | S3 `s3://<bucket>/<prefix>/<app>/<run id>/image.raw` | the raw disk image (uncompressed) |
 | artifact `generated-source` | the generated app with its local git history (one commit per stage), `.pipeline/` transcripts and gate reports, `spec.md`, `pipeline-report.json` |
-| artifact `attestation` | `statement.json` (the signed in-toto statement, decoded), `attestation.sigstore.json` (Sigstore bundle), `predicate.json`, `pcr_measurements.json`, `image.packages`, `kiwi.log`, `spec.md` |
-| job summary | spec sha256, image sha256, PCR4/7/12, attestation URL, S3 URI |
+| artifact `statement` | `statement.json`, the build result (below). Its signature and provenance stay on GitHub (attestation URL in the summary; `gh attestation download statement.json --repo <owner>/<repo>` fetches the bundle) |
+| job summary | spec sha256, PCR4/7/12, statement sha256, attestation URL, S3 URI |
 
-The predicate is intentionally minimal:
+`statement.json`:
 
 ```json
 { "spec": { "sha256": "…" },
@@ -75,17 +77,18 @@ The predicate is intentionally minimal:
 
 ## Verify a statement
 
+Download `statement.json` from the run's `statement` artifact, then:
+
 ```
-aws s3 cp s3://<bucket>/<key>/image.raw .
-gh attestation verify image.raw --repo <owner>/<repo> --format json \
-  | jq '.[0].verificationResult.statement.predicate'
+gh attestation verify statement.json --repo <owner>/<repo>
 ```
 
-`gh` verifies the Sigstore signature and that the statement was produced by this repository's
-workflow. Compare `spec.sha256` with `sha256sum` of the spec you expect, and `PCR4`/`PCR12` with
-the values an instance reports through NitroTPM attestation (or put them in a KMS key policy with
-`kms:RecipientAttestation:NitroTPMPCR4` and `kms:RecipientAttestation:NitroTPMPCR12`). PCR7 only
-becomes meaningful once UEFI Secure Boot is enabled for the AMI.
+`gh` verifies the Sigstore signature over the file's sha256 and the provenance: the file was
+produced by this repository's workflow, at a given commit and run. Then compare `spec.sha256` with
+`sha256sum` of the spec you expect, and `PCR4`/`PCR12` with the values an instance reports through
+NitroTPM attestation (or put them in a KMS key policy with `kms:RecipientAttestation:NitroTPMPCR4`
+and `kms:RecipientAttestation:NitroTPMPCR12`). PCR7 only becomes meaningful once UEFI Secure Boot
+is enabled for the AMI.
 
 Why the binding holds: the dm-verity root hash of the image lives in `/etc/veritytab` inside the
 initrd, the initrd is inside the unified kernel image, and PCR4 is the measurement of that image.
@@ -125,7 +128,7 @@ pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must fo
 pipeline/prompts/                            system, generate, review, fix prompts
 ami/build-ami.sh, ami/in-container/          KIWI NG build in a privileged amazonlinux:2023 container
 ami/app.service.tmpl                         systemd unit for the generated app
-attest/make-predicate.sh                     predicate = spec sha256 + PCRs
+attest/make-statement.sh                     statement.json = spec sha256 + PCRs
 scripts/register-ami.sh                      S3 image → snapshot → AMI
 ```
 
