@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "app.yaml",
+  "description": "Packaging contract between the generated app and the pipeline/AMI build. See pipeline/CONTRACT.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["name", "packages", "build", "test", "exec", "port", "healthcheck"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+      "description": "Lowercase identifier; used as image name, systemd unit name and /var/lib/<name>."
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime", "build"],
+      "properties": {
+        "runtime": { "$ref": "#/definitions/packageList", "description": "AL2023 dnf packages installed into the AMI." },
+        "build": { "$ref": "#/definitions/packageList", "description": "AL2023 dnf packages needed only to build/test; never installed into the AMI." }
+      }
+    },
+    "build": { "type": "string", "minLength": 1, "description": "Shell command run at the app root in amazonlinux:2023; must produce ./dist." },
+    "test": { "type": "string", "minLength": 1, "description": "Shell command; exit 0 = tests pass." },
+    "exec": { "type": "string", "pattern": "^/\\S", "description": "Absolute path to the binary plus arguments; cwd is /opt/app (= dist/)." },
+    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+    "healthcheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/", "description": "GET path that returns 200 when the app is ready." },
+        "timeout_s": { "type": "integer", "minimum": 1, "maximum": 600, "default": 60 }
+      }
+    },
+    "env": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },
+      "additionalProperties": { "type": ["string", "number", "boolean"] },
+      "description": "Non-secret environment variables written to /etc/app/env."
+    }
+  },
+  "definitions": {
+    "packageList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^[A-Za-z0-9._+-]+$" }
+    }
+  }
+}

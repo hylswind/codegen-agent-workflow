@@ -1,0 +1,19 @@
+[Unit]
+Description=${APP_NAME} (generated app, attestable build)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=app
+Group=app
+WorkingDirectory=/opt/app
+EnvironmentFile=-/etc/app/env
+ExecStart=${APP_EXEC}
+Restart=always
+RestartSec=2
+StateDirectory=${APP_NAME}
+RuntimeDirectory=${APP_NAME}
+
+[Install]
+WantedBy=multi-user.target

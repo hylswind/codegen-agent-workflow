@@ -1,0 +1,136 @@
+name: Build attestable AMI from spec
+
+on:
+  workflow_dispatch:
+    inputs:
+      spec_url:
+        description: Public URL of the APP SPEC markdown (e.g. a GitHub raw file URL)
+        required: true
+        type: string
+      agent:
+        description: Agent to use (a directory under agents/)
+        required: false
+        default: claude-code
+        type: string
+      max_iterations:
+        description: Maximum number of review/fix rounds after the first generation
+        required: false
+        default: "3"
+        type: string
+
+permissions:
+  contents: read
+  id-token: write          # Sigstore signing for actions/attest
+  attestations: write
+  artifact-metadata: write
+
+jobs:
+  build:
+    name: Generate app, build attestable AMI, sign statement
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      AGENT: ${{ inputs.agent }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install latest tools and agent, free disk space
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq python3 python3-yaml python3-jsonschema
+          bash "agents/$AGENT/install.sh"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker system prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Fetch spec
+        env:
+          SPEC_URL: ${{ inputs.spec_url }}
+        run: |
+          curl -fsSL "$SPEC_URL" -o spec.md
+          test -s spec.md
+
+      - name: Run agent pipeline
+        env:
+          AGENT_AUTH_TOKEN: ${{ secrets.AGENT_AUTH_TOKEN }}
+          AGENT_MODEL: ${{ vars.AGENT_MODEL }}
+          MAX_ITERATIONS: ${{ inputs.max_iterations }}
+        run: |
+          bash pipeline/run-pipeline.sh --spec spec.md --out app --agent "$AGENT" \
+            --max-iterations "$MAX_ITERATIONS" --report pipeline-report.json
+
+      - name: Upload generated source
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: generated-source
+          include-hidden-files: true
+          path: |
+            app
+            !app/node_modules
+            !app/dist
+            spec.md
+            pipeline-report.json
+
+      - name: Build attestable AMI image
+        run: bash ami/build-ami.sh app ami-out
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload image to S3
+        id: s3
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_PREFIX: ${{ vars.S3_PREFIX }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          app_name=$(python3 -c 'import yaml; print(yaml.safe_load(open("app/app.yaml"))["name"])')
+          key="${S3_PREFIX:+${S3_PREFIX%/}/}${app_name}/${RUN_ID}/image.raw"
+          aws s3 cp ami-out/image.raw "s3://${S3_BUCKET}/${key}"
+          echo "uri=s3://${S3_BUCKET}/${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Build predicate (spec sha256 + PCRs)
+        run: bash attest/make-predicate.sh spec.md ami-out/pcr_measurements.json > predicate.json
+
+      - name: Sign statement
+        id: attest
+        uses: actions/attest@v4
+        with:
+          subject-path: ami-out/image.raw
+          predicate-type: https://github.com/${{ github.repository }}/attestations/attestable-ami-build/v1
+          predicate-path: predicate.json
+
+      - name: Collect attestation files
+        env:
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          mkdir attestation
+          cp "$BUNDLE" attestation/attestation.sigstore.json
+          jq -r '.dsseEnvelope.payload' attestation/attestation.sigstore.json | base64 -d | jq . > attestation/statement.json
+          cp predicate.json ami-out/pcr_measurements.json ami-out/image.packages ami-out/kiwi.log spec.md attestation/
+
+      - name: Upload attestation
+        uses: actions/upload-artifact@v7
+        with:
+          name: attestation
+          path: attestation
+
+      - name: Summary
+        env:
+          S3_URI: ${{ steps.s3.outputs.uri }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+        run: |
+          {
+            echo "- spec sha256: $(jq -r .spec.sha256 predicate.json)"
+            echo "- image sha256: $(sha256sum ami-out/image.raw | cut -d' ' -f1)"
+            echo "- PCR4: $(jq -r .measurements.PCR4 predicate.json)"
+            echo "- PCR7: $(jq -r .measurements.PCR7 predicate.json)"
+            echo "- PCR12: $(jq -r .measurements.PCR12 predicate.json)"
+            echo "- attestation: $ATTESTATION_URL"
+            echo "- image: $S3_URI"
+          } >> "$GITHUB_STEP_SUMMARY"
