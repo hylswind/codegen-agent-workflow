@@ -12,6 +12,7 @@ set -euo pipefail
 if [[ $# -ne 2 ]]; then echo "usage: $0 <image.raw | s3://bucket/key/image.raw> <ami-name>" >&2; exit 2; fi
 image=$1
 name=$2
+export PATH="$HOME/.cargo/bin:$PATH"   # where `cargo install` puts coldsnap
 command -v coldsnap >/dev/null || { echo "coldsnap not found; install with: cargo install --locked coldsnap" >&2; exit 2; }
 
 if [[ $image == s3://* ]]; then
