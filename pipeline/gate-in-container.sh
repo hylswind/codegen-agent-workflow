@@ -45,6 +45,9 @@ case "$mode" in
     cd /work
     # shellcheck disable=SC2086
     install_packages /report/packages.log $APP_PKGS_BUILD $APP_PKGS_RUNTIME || fail packages
+    # /work is a git repo owned by the host user; tools that call git (go build's VCS stamping,
+    # npm) would otherwise fail with "dubious ownership".
+    command -v git >/dev/null && git config --global --add safe.directory '*'
     rm -rf dist
     if ! bash -c "$APP_BUILD" > /report/build.log 2>&1; then fail build; fi
     if [[ ! -d dist || -z $(ls -A dist) ]]; then

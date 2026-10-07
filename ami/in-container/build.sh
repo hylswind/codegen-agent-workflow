@@ -18,7 +18,11 @@ echo "== installing latest AL2023 toolchain"
 dnf -y --releasever=latest upgrade
 dnf -y install kiwi-cli python3-kiwi kiwi-systemdeps-core python3-poetry-core qemu-img veritysetup \
   erofs-utils aws-nitro-tpm-tools kiwi-image-descriptions-examples \
-  sudo util-linux findutils python3 python3-pyyaml rsync git
+  util-linux findutils python3 python3-pyyaml rsync git
+# AWS's edit_boot_install.sh runs nitro-tpm-pcr-compute through sudo. We already are root and the
+# container has no PAM setup for sudo, so provide a pass-through sudo ahead of /usr/bin.
+printf '#!/bin/sh\nexec "$@"\n' > /usr/local/bin/sudo
+chmod +x /usr/local/bin/sudo
 kiwi-ng --version
 rpm -q aws-nitro-tpm-tools kiwi-image-descriptions-examples
 
