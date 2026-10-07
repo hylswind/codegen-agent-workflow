@@ -1,37 +1,31 @@
 #!/usr/bin/env bash
-# Turn an uploaded raw image into an attestable AMI (UEFI boot, NitroTPM 2.0):
-#   S3 object → EBS snapshot (import-snapshot, RAW) → register-image
+# Turn a built raw image into an attestable AMI (UEFI boot, NitroTPM 2.0) with coldsnap:
+#   image.raw → EBS snapshot (EBS direct API, no vmimport role) → register-image
 #
-#   register-ami.sh s3://<bucket>/<key>/image.raw <ami-name>
+#   register-ami.sh <image.raw | s3://bucket/key/image.raw> <ami-name>
 #
-# Needs: aws CLI with credentials in the bucket's region, the one-time "vmimport" service role
-# (see README), and permissions ec2:ImportSnapshot, ec2:DescribeImportSnapshotTasks, ec2:RegisterImage.
+# Needs: aws CLI, coldsnap (cargo install --locked coldsnap), and credentials allowed to
+#   ebs:StartSnapshot, ebs:PutSnapshotBlock, ebs:CompleteSnapshot, ec2:DescribeSnapshots,
+#   ec2:RegisterImage (plus s3:GetObject when an s3:// URI is given).
 set -euo pipefail
 
-if [[ $# -ne 2 ]]; then echo "usage: $0 s3://<bucket>/<key>/image.raw <ami-name>" >&2; exit 2; fi
-uri=$1
+if [[ $# -ne 2 ]]; then echo "usage: $0 <image.raw | s3://bucket/key/image.raw> <ami-name>" >&2; exit 2; fi
+image=$1
 name=$2
-path=${uri#s3://}
-bucket=${path%%/*}
-key=${path#*/}
+command -v coldsnap >/dev/null || { echo "coldsnap not found; install with: cargo install --locked coldsnap" >&2; exit 2; }
 
-task=$(aws ec2 import-snapshot --description "$name" \
-  --disk-container "Format=RAW,UserBucket={S3Bucket=$bucket,S3Key=$key}" \
-  --query ImportTaskId --output text)
-echo "import task: $task"
+if [[ $image == s3://* ]]; then
+  local_file=$(basename "$image")
+  if [[ ! -f $local_file ]]; then
+    echo "downloading $image"
+    aws s3 cp "$image" "$local_file"
+  fi
+  image=$local_file
+fi
+[[ -f $image ]] || { echo "not found: $image" >&2; exit 2; }
 
-while :; do
-  detail=$(aws ec2 describe-import-snapshot-tasks --import-task-ids "$task" \
-    --query 'ImportSnapshotTasks[0].SnapshotTaskDetail' --output json)
-  status=$(jq -r .Status <<< "$detail")
-  echo "  $status $(jq -r '.Progress // ""' <<< "$detail") $(jq -r '.StatusMessage // ""' <<< "$detail")"
-  case "$status" in
-    completed) break ;;
-    deleted|deleting) echo "import failed: $(jq -r '.StatusMessage // ""' <<< "$detail")" >&2; exit 1 ;;
-  esac
-  sleep 15
-done
-snapshot=$(jq -r .SnapshotId <<< "$detail")
+echo "uploading $image as an EBS snapshot"
+snapshot=$(coldsnap upload --wait --omit-zero-blocks --tag "Key=Name,Value=$name" "$image")
 echo "snapshot: $snapshot"
 
 ami=$(aws ec2 register-image --name "$name" \

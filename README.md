@@ -94,15 +94,18 @@ Changing any file under `/opt/app` changes the root hash and therefore PCR4.
 ## Turn the image into an AMI
 
 ```
-scripts/register-ami.sh s3://<bucket>/<key>/image.raw <ami-name>
+cargo install --locked coldsnap        # once; no prebuilt binaries are published
+scripts/register-ami.sh s3://<bucket>/<key>/image.raw <ami-name>   # or a local image.raw
 ```
 
-This runs `aws ec2 import-snapshot` (RAW, from S3) and then `register-image` with UEFI boot and
-`--tpm-support v2.0`. It needs the one-time VM Import service role named `vmimport` with read
-access to the bucket (AWS doc: *Required permissions for VM Import/Export*), and the bucket must be
-in the region where you register the AMI. Launch on a NitroTPM-capable instance type (M5/M6/M7,
-C5/C6/C7, R5/R6/R7, T3/T4g and newer). There is no SSH by design; watch
-`aws ec2 get-console-output` for boot and service start, then hit `http://<ip>:<port><healthcheck>`.
+This downloads the image if given an S3 URI, writes it to an EBS snapshot with
+[coldsnap](https://github.com/awslabs/coldsnap) (EBS direct API, no VM Import role), and runs
+`register-image` with UEFI boot and `--tpm-support v2.0`. The credentials need `ebs:StartSnapshot`,
+`ebs:PutSnapshotBlock`, `ebs:CompleteSnapshot` on `arn:aws:ec2:*::snapshot/*`, plus
+`ec2:DescribeSnapshots`, `ec2:RegisterImage` and `s3:GetObject` on the bucket. Launch on a
+NitroTPM-capable instance type (M5/M6/M7, C5/C6/C7, R5/R6/R7, T3/T4g and newer) with a security
+group that allows the app's port. There is no SSH by design; watch `aws ec2 get-console-output` for
+boot and service start, then hit `http://<ip>:<port><healthcheck>`.
 
 ## Swap the agent
 
