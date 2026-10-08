@@ -123,7 +123,7 @@ is a fresh, unattended session whose state is the files in the app directory.
 .github/workflows/build-attestable-ami.yml   the workflow (one job: fetch spec → pipeline → AMI → S3 → attest)
 agents/                                      agent interface + claude-code implementation
 pipeline/run-pipeline.sh                     generate → gate → review → [fix → gate → review]×N
-pipeline/gate.sh, gate-in-container.sh       validate / build / test / smoke in amazonlinux:2023
+pipeline/gate.sh, gate-in-container.sh       validate / build / test in amazonlinux:2023
 pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow
 pipeline/prompts/                            system, generate, review, fix prompts
 ami/build-ami.sh, ami/in-container/          KIWI NG build in a privileged amazonlinux:2023 container

@@ -2,7 +2,7 @@ You are an independent reviewer. Do not modify any files. Review the application
 
 Inputs:
 - SPEC.md: the requirements. CONTRACT.md: the packaging rules the pipeline enforces.
-- .pipeline/gate-report/summary.json and the *.log files next to it: the automated gate result for the current code (app.yaml validation, package install, build, tests, start-up check in a clean Amazon Linux 2023 container).
+- .pipeline/gate-report/summary.json and the *.log files next to it: the automated gate result for the current code (app.yaml validation, package install, build and tests in a clean Amazon Linux 2023 container).
 - The source code, tests, scripts and app.yaml.
 
 Check, in this order:

@@ -53,7 +53,7 @@ env:                          # optional, non-secret, written to /etc/app/env
 | `test` | Runs after `build` in the same container. Must not need network |
 | `exec` | Becomes `ExecStart=` of the systemd unit. Absolute path, plain arguments, no shell syntax |
 | `port` | TCP port, bound on `0.0.0.0` |
-| `healthcheck.path` | Polled by the pipeline and usable by load balancers |
+| `healthcheck.path` | GET that returns 200 when the app is ready; for checking the instance after launch (the pipeline does not call it) |
 | `env` | Plain `KEY: value` pairs. No secrets |
 
 ### Examples
@@ -102,8 +102,8 @@ Unknown package names fail the gate; the error names them.
 2. Do not depend on SSH, cloud-init, user-data, or anything a person would do on the instance.
 3. Listen on `0.0.0.0:<port>`; respond 200 on the healthcheck path once ready.
 4. Write only under `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY` or `/tmp`.
-5. `dist/` must be self-contained together with `packages.runtime`; the pipeline starts the app from
-   a clean container that has only those packages installed.
+5. `dist/` must be self-contained together with `packages.runtime`; nothing else is installed in
+   the AMI.
 6. `build` may use the network (downloading dependencies); `test` must not.
 7. Log to stdout/stderr.
 
@@ -112,8 +112,6 @@ Unknown package names fail the gate; the error names them.
 1. `app.yaml` validates against `pipeline/schema/app.schema.json`.
 2. In a clean `amazonlinux:2023` container: install `packages.build` + `packages.runtime`; run `build`;
    `dist/` must be non-empty; run `test`.
-3. In a second clean container with only `packages.runtime`, `dist/` mounted read-only at `/opt/app`:
-   start `exec` as user `app`, poll `http://127.0.0.1:<port><healthcheck.path>` until 200.
 
 Results are written to `.pipeline/gate-report/summary.json` plus `validate.log`, `packages.log`,
-`build.log`, `test.log`, `smoke.log`.
+`build.log`, `test.log`.
