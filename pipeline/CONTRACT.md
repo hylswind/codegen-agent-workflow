@@ -55,6 +55,7 @@ env:                          # optional, non-secret, written to /etc/app/env
 | `port` | TCP port, bound on `0.0.0.0` |
 | `healthcheck.path` | GET that returns 200 when the app is ready; for checking the instance after launch (the pipeline does not call it) |
 | `env` | Plain `KEY: value` pairs. No secrets |
+| `system.units` | Optional. Root-run systemd units shipped in `dist/system/`, see "Privileged system units" |
 
 ### Examples
 
@@ -106,6 +107,29 @@ Unknown package names fail the gate; the error names them.
    the AMI.
 6. `build` may use the network (downloading dependencies); `test` must not.
 7. Log to stdout/stderr.
+
+## Privileged system units (optional)
+
+Some apps need root work before they start, for example preparing a data volume. List systemd unit
+files under `system.units`; paths are relative to `dist/` and `build` must produce them:
+
+```yaml
+system:
+  units: [system/my-app-data.service]
+```
+
+For each unit the AMI build installs `dist/<path>` as `/etc/systemd/system/<name>.service`, enables
+it, and adds `Requires=` and `After=` for it to the app's own unit, so the app starts only after
+the unit succeeded. Rules for these units:
+
+1. They run as root (no `User=`). Everything they execute lives under `/opt/app/…` (absolute
+   paths) or comes from `packages.runtime`.
+2. Idempotent: `Type=oneshot` with `RemainAfterExit=yes`; re-running after success is a no-op.
+3. Fail closed: on any doubt exit non-zero with one log line starting with `REFUSED:`. Never
+   destroy or reformat existing data.
+4. No secrets in files. Key material they generate stays in memory or on the volume they protect.
+5. Their logic is unit-testable offline with injected command paths (fake `cryptsetup`, `mount`
+   and similar on `PATH`).
 
 ## What the gate checks
 

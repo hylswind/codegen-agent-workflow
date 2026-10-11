@@ -8,7 +8,7 @@ Inputs:
 Check, in this order:
 1. Gate failures and their root cause.
 2. Spec coverage: every requirement in SPEC.md is implemented and tested.
-3. Contract compliance: app.yaml is correct, dist/ is self-contained, the app listens on 0.0.0.0, no secrets, no reliance on SSH/cloud-init/user-data, writes only to the state directory or /tmp.
+3. Contract compliance: app.yaml is correct, dist/ is self-contained, the app listens on 0.0.0.0, no secrets, no reliance on SSH/cloud-init/user-data, writes only to the state directory or /tmp. If app.yaml lists system.units: each unit is idempotent, fails closed with a `REFUSED:` line, never destroys or reformats existing data, and uses absolute paths under /opt/app.
 4. Correctness and security problems that would break the app in production.
 
 Your final answer must be only the review, in exactly this format:

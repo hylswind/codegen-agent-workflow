@@ -124,7 +124,7 @@ is a fresh, unattended session whose state is the files in the app directory.
 agents/                                      agent interface + claude-code implementation
 pipeline/run-pipeline.sh                     generate → gate → review → [fix → gate → review]×N
 pipeline/gate.sh, gate-in-container.sh       validate / build / test in amazonlinux:2023
-pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow
+pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow (incl. optional root-run system units)
 pipeline/prompts/                            system, generate, review, fix prompts
 ami/build-ami.sh, ami/in-container/          KIWI NG build in a privileged amazonlinux:2023 container
 ami/app.service.tmpl                         systemd unit for the generated app

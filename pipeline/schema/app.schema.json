@@ -38,6 +38,19 @@
       "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },
       "additionalProperties": { "type": ["string", "number", "boolean"] },
       "description": "Non-secret environment variables written to /etc/app/env."
+    },
+    "system": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional root-run systemd units the app ships (see CONTRACT.md, 'Privileged system units').",
+      "properties": {
+        "units": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^system/[A-Za-z0-9_.-]+\\.service$" },
+          "description": "Unit files relative to dist/; installed to /etc/systemd/system, enabled, and required by the app unit."
+        }
+      }
     }
   },
   "definitions": {
