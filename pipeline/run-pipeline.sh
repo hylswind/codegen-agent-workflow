@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-# Drive the agent: generate → gate → review → [fix → gate → review] × up to N.
-# All state lives in <out>/ (SPEC.md, CONTRACT.md, the app, REVIEW.md, .pipeline/).
+# Drive the agent on an existing app repository:
+#   checkout <base-repo>@<base-commit> → update → gate → review → [fix → gate → review] × up to N
+# All state lives in <out>/: the checkout, CONTRACT.md, REVIEW.md, .pipeline/.
 #
-#   run-pipeline.sh --spec <spec.md> --out <dir> [--agent <name>] [--max-iterations <n>] [--report <file>]
+#   run-pipeline.sh --base-repo <url> --base-commit <sha> --out <dir> \
+#                   [--agent <name>] [--max-iterations <n>] [--report <file>]
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 --spec <spec.md> --out <dir> [--agent <name>] [--max-iterations <n>] [--report <file>]" >&2
+  echo "usage: $0 --base-repo <url> --base-commit <40-hex sha> --out <dir> [--agent <name>] [--max-iterations <n>] [--report <file>]" >&2
   exit 2
 }
 
-spec=""; out="app"; agent="claude-code"; max_iter=3; report="pipeline-report.json"
+base_repo=""; base_commit=""; out="app"; agent="claude-code"; max_iter=3; report="pipeline-report.json"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --spec) spec=$2; shift 2 ;;
+    --base-repo) base_repo=$2; shift 2 ;;
+    --base-commit) base_commit=$2; shift 2 ;;
     --out) out=$2; shift 2 ;;
     --agent) agent=$2; shift 2 ;;
     --max-iterations) max_iter=$2; shift 2 ;;
@@ -21,7 +24,7 @@ while [[ $# -gt 0 ]]; do
     *) usage ;;
   esac
 done
-[[ -f "$spec" ]] || usage
+[[ -n $base_repo && $base_commit =~ ^[0-9a-f]{40}$ ]] || usage
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 agent_run="$root/agents/$agent/run.sh"
@@ -32,16 +35,27 @@ export AGENT_SYSTEM_PROMPT_FILE="$prompts/system.md"
 mkdir -p "$out"
 out=$(realpath "$out")
 report=$(realpath -m "$report")
-cp "$spec" "$out/SPEC.md"
+[[ -z "$(ls -A "$out")" ]] || { echo "$out must be empty" >&2; exit 2; }
+
+echo "== checking out $base_repo @ $base_commit"
+git -C "$out" init -q
+git -C "$out" fetch -q --depth 1 "$base_repo" "$base_commit"
+git -C "$out" checkout -q -b pipeline FETCH_HEAD
+head=$(git -C "$out" rev-parse HEAD)
+[[ $head == "$base_commit" ]] || { echo "fetched $head, expected $base_commit" >&2; exit 2; }
+[[ -s "$out/SPEC.md" ]] || { echo "SPEC.md is missing or empty at $base_commit" >&2; exit 2; }
+
+rm -f "$out/REVIEW.md"
 cp "$root/pipeline/CONTRACT.md" "$out/CONTRACT.md"
 mkdir -p "$out/.pipeline"
-[[ -d "$out/.git" ]] || git -C "$out" init -q
+jq -n --arg repo "$base_repo" --arg commit "$base_commit" '{repo:$repo, commit:$commit}' > "$out/.pipeline/base.json"
 printf 'dist/\n.pipeline/\n' > "$out/.git/info/exclude"
 
 commit() {
   git -C "$out" add -A >/dev/null
   git -C "$out" -c user.name=pipeline -c user.email=pipeline@localhost commit -q --allow-empty -m "$1"
 }
+commit "init: contract (base ${base_commit:0:7})"
 
 stages='[]'
 record() { # <name> <status> <extra-json>
@@ -83,20 +97,20 @@ review_stage() { # <name>; sets $verdict
 }
 
 finish() { # <success|failed>
-  jq -n --arg status "$1" --arg agent "$agent" --argjson fix_rounds "$iter" \
-        --argjson max_fix_rounds "$max_iter" --argjson stages "$stages" \
-        '{status:$status, agent:$agent, fix_rounds:$fix_rounds, max_fix_rounds:$max_fix_rounds, stages:$stages}' \
-        > "$report"
+  jq -n --arg status "$1" --arg agent "$agent" --arg repo "$base_repo" --arg commit "$base_commit" \
+        --argjson fix_rounds "$iter" --argjson max_fix_rounds "$max_iter" --argjson stages "$stages" \
+        '{status:$status, agent:$agent, base:{repo:$repo, commit:$commit},
+          fix_rounds:$fix_rounds, max_fix_rounds:$max_fix_rounds, stages:$stages}' > "$report"
   echo "pipeline: $1 (report: $report)"
 }
 
 iter=0
-if ! agent_stage "00-generate" edit "$prompts/generate.md"; then
-  commit "generate (agent failed)"
+if ! agent_stage "00-update" edit "$prompts/update.md"; then
+  commit "update (agent failed)"
   finish failed
   exit 1
 fi
-commit "generate"
+commit "update"
 
 while :; do
   tag=$(printf '%02d' "$iter")

@@ -3,8 +3,12 @@ name: Build attestable AMI from spec
 on:
   workflow_dispatch:
     inputs:
-      spec_url:
-        description: Public URL of the APP SPEC markdown (e.g. a GitHub raw file URL)
+      repo:
+        description: Public GitHub repository holding SPEC.md and the app (https URL)
+        required: true
+        type: string
+      commit:
+        description: Commit to build from (40 hex characters)
         required: true
         type: string
       agent:
@@ -43,21 +47,25 @@ jobs:
           docker system prune -af >/dev/null 2>&1 || true
           df -h /
 
-      - name: Fetch spec
+      - name: Check inputs
         env:
-          SPEC_URL: ${{ inputs.spec_url }}
+          REPO: ${{ inputs.repo }}
+          COMMIT: ${{ inputs.commit }}
         run: |
-          curl -fsSL "$SPEC_URL" -o spec.md
-          test -s spec.md
+          [[ "$REPO" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(\.git)?/?$ ]] \
+            || { echo "repo must be an https://github.com/<owner>/<name> URL"; exit 1; }
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "commit must be a 40-character hex SHA"; exit 1; }
 
       - name: Run agent pipeline
         env:
           AGENT_AUTH_TOKEN: ${{ secrets.AGENT_AUTH_TOKEN }}
           AGENT_MODEL: ${{ vars.AGENT_MODEL }}
           MAX_ITERATIONS: ${{ inputs.max_iterations }}
+          REPO: ${{ inputs.repo }}
+          COMMIT: ${{ inputs.commit }}
         run: |
-          bash pipeline/run-pipeline.sh --spec spec.md --out app --agent "$AGENT" \
-            --max-iterations "$MAX_ITERATIONS" --report pipeline-report.json
+          bash pipeline/run-pipeline.sh --base-repo "$REPO" --base-commit "$COMMIT" --out app \
+            --agent "$AGENT" --max-iterations "$MAX_ITERATIONS" --report pipeline-report.json
 
       - name: Upload generated source
         if: always()
@@ -69,7 +77,6 @@ jobs:
             app
             !app/node_modules
             !app/dist
-            spec.md
             pipeline-report.json
 
       - name: Build attestable AMI image
@@ -94,8 +101,13 @@ jobs:
           aws s3 cp ami-out/image.raw "s3://${S3_BUCKET}/${key}"
           echo "uri=s3://${S3_BUCKET}/${key}" >> "$GITHUB_OUTPUT"
 
-      - name: Build statement (spec sha256 + PCRs)
-        run: bash attest/make-statement.sh spec.md ami-out/pcr_measurements.json > statement.json
+      - name: Build statement (spec sha256, base commit, PCRs)
+        env:
+          REPO: ${{ inputs.repo }}
+          COMMIT: ${{ inputs.commit }}
+        run: |
+          git -C app show "$COMMIT:SPEC.md" > spec.md     # the spec exactly as committed, untouched by the agent
+          bash attest/make-statement.sh spec.md ami-out/pcr_measurements.json "$REPO" "$COMMIT" > statement.json
 
       - name: Sign statement (provenance of statement.json)
         id: attest
@@ -115,6 +127,7 @@ jobs:
           ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         run: |
           {
+            echo "- base: $(jq -r '.base.repo + " @ " + .base.commit' statement.json)"
             echo "- spec sha256: $(jq -r .spec.sha256 statement.json)"
             echo "- PCR4: $(jq -r .measurements.PCR4 statement.json)"
             echo "- PCR7: $(jq -r .measurements.PCR7 statement.json)"

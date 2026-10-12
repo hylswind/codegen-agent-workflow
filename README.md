@@ -3,10 +3,13 @@
 A GitHub Actions workflow that turns an **APP SPEC** into an **AWS Attestable AMI** and signs a
 statement binding the two together:
 
-1. **Fetch the spec** from a public URL (for example a GitHub raw file URL).
-2. **Agent pipeline**: a coding agent generates the app, a deterministic gate builds and tests it in
-   a clean Amazon Linux 2023 container, an independent review session checks it against the spec,
-   and the agent fixes what is found. Repeats until the gate passes and the reviewer approves.
+1. **Check out the app repository** at the given commit. `SPEC.md` at its root is the spec; the
+   app's code and `app.yaml` sit beside it.
+2. **Agent pipeline**: a coding agent updates the app to the spec and to the current toolchain
+   (language version, dependencies, AL2023 packages, fixes), a deterministic gate builds and tests
+   it in a clean Amazon Linux 2023 container, an independent review session checks the changes
+   since the base commit against the spec, and the agent fixes what is found. Repeats until the
+   gate passes and the reviewer approves.
 3. **Attestable AMI**: KIWI NG builds Amazon Linux 2023 with a unified kernel image, a read-only
    dm-verity root, and no SSH / SSM / cloud-init / Instance Connect, with the app installed natively
    under `/opt/app` and started by systemd. The build yields the NitroTPM reference measurements
@@ -55,23 +58,29 @@ Actions → **Build attestable AMI from spec** → *Run workflow*, or:
 
 ```
 gh workflow run build-attestable-ami.yml \
-  -f spec_url=https://raw.githubusercontent.com/<owner>/<repo>/main/spec.md \
+  -f repo=https://github.com/<owner>/<app-repo> \
+  -f commit=<40-hex commit sha> \
   -f max_iterations=3
 ```
+
+The app repository must be public and, at that commit, contain `SPEC.md` at the root plus the
+application itself laid out as `pipeline/CONTRACT.md` requires (`app.yaml`, build and test
+scripts, source, tests). The agent never edits `SPEC.md`.
 
 Outputs:
 
 | Where | What |
 |---|---|
 | S3 `s3://<bucket>/<prefix>/<app>/<run id>/image.raw` | the raw disk image (uncompressed) |
-| artifact `generated-source` | the generated app with its local git history (one commit per stage), `.pipeline/` transcripts and gate reports, `spec.md`, `pipeline-report.json` |
+| artifact `generated-source` | the updated app with its git history (the base commit followed by one commit per stage), `.pipeline/` transcripts and gate reports, `pipeline-report.json` |
 | artifact `statement` | `statement.json`, the build result (below). Its signature and provenance stay on GitHub (attestation URL in the summary; `gh attestation download statement.json --repo <owner>/<repo>` fetches the bundle) |
-| job summary | spec sha256, PCR4/7/12, statement sha256, attestation URL, S3 URI |
+| job summary | base repo and commit, spec sha256, PCR4/7/12, statement sha256, attestation URL, S3 URI |
 
-`statement.json`:
+`statement.json` (the spec hash is computed from `SPEC.md` exactly as committed at the base commit):
 
 ```json
 { "spec": { "sha256": "…" },
+  "base": { "repo": "https://github.com/<owner>/<app-repo>", "commit": "…" },
   "measurements": { "hashAlgorithm": "SHA384", "PCR4": "…", "PCR7": "…", "PCR12": "…" } }
 ```
 
@@ -122,13 +131,13 @@ is a fresh, unattended session whose state is the files in the app directory.
 ```
 .github/workflows/build-attestable-ami.yml   the workflow (one job: fetch spec → pipeline → AMI → S3 → attest)
 agents/                                      agent interface + claude-code implementation
-pipeline/run-pipeline.sh                     generate → gate → review → [fix → gate → review]×N
+pipeline/run-pipeline.sh                     checkout base → update → gate → review → [fix → gate → review]×N
 pipeline/gate.sh, gate-in-container.sh       validate / build / test in amazonlinux:2023
 pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow (incl. optional root-run system units)
-pipeline/prompts/                            system, generate, review, fix prompts
+pipeline/prompts/                            system, update, review, fix prompts
 ami/build-ami.sh, ami/in-container/          KIWI NG build in a privileged amazonlinux:2023 container
 ami/app.service.tmpl                         systemd unit for the generated app
-attest/make-statement.sh                     statement.json = spec sha256 + PCRs
+attest/make-statement.sh                     statement.json = spec sha256 + base commit + PCRs
 scripts/register-ami.sh                      S3 image → snapshot → AMI
 ```
 
@@ -137,4 +146,4 @@ scripts/register-ami.sh                      S3 image → snapshot → AMI
 - `pipeline/gate.sh <app-dir> <report-dir>` and `ami/build-ami.sh <app-dir> <out>` need Docker;
   the AMI build additionally needs loop devices on the host (Linux or WSL2 with Docker).
 - `AGENT_AUTH_TOKEN=… agents/claude-code/run.sh prompt.txt <workdir> <out> edit` runs one agent task.
-- `pipeline/run-pipeline.sh --spec spec.md --out app` runs the whole agent loop.
+- `pipeline/run-pipeline.sh --base-repo <url> --base-commit <sha> --out app` runs the whole agent loop.

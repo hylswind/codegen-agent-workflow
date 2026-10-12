@@ -19,6 +19,7 @@ The app is installed natively into an Amazon Linux 2023 **Attestable AMI**:
 ## Required layout
 
 ```
+SPEC.md             # the specification; owned by the repository, never edited by the agent
 app.yaml            # this contract, filled in (see below)
 scripts/build.sh    # or any command named in app.yaml "build"
 scripts/test.sh     # or any command named in app.yaml "test"
