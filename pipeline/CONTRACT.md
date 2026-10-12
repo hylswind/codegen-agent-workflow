@@ -37,10 +37,6 @@ packages:
 build: ./scripts/build.sh     # runs at the app root inside amazonlinux:2023; must create ./dist
 test: ./scripts/test.sh       # exit 0 = pass
 exec: /opt/app/todo-api       # absolute path + args; cwd is /opt/app (the contents of dist/)
-port: 8080                    # the app must listen on 0.0.0.0:<port>
-healthcheck:
-  path: /healthz              # GET returns 200 when the app is ready
-  timeout_s: 60
 env:                          # optional, non-secret, written to /etc/app/env
   LOG_LEVEL: info
 ```
@@ -53,8 +49,6 @@ env:                          # optional, non-secret, written to /etc/app/env
 | `build` | Must leave **everything** the app needs at run time inside `./dist` (binary, assets, `node_modules`, vendored Python packages…) |
 | `test` | Runs after `build` in the same container. Must not need network |
 | `exec` | Becomes `ExecStart=` of the systemd unit. Absolute path, plain arguments, no shell syntax |
-| `port` | TCP port, bound on `0.0.0.0` |
-| `healthcheck.path` | GET that returns 200 when the app is ready; for checking the instance after launch (the pipeline does not call it) |
 | `env` | Plain `KEY: value` pairs. No secrets |
 | `system.units` | Optional. Root-run systemd units shipped in `dist/system/`, see "Privileged system units" |
 
@@ -68,8 +62,6 @@ packages: { runtime: [], build: [golang] }
 build: CGO_ENABLED=0 go build -o dist/todo-api ./cmd/todo-api
 test: go test ./...
 exec: /opt/app/todo-api
-port: 8080
-healthcheck: { path: /healthz, timeout_s: 60 }
 ```
 
 Node.js:
@@ -80,8 +72,6 @@ packages: { runtime: [nodejs22], build: [nodejs22-npm] }
 build: npm ci && npm run build && npm ci --omit=dev && rm -rf dist && mkdir dist && cp -r package.json build node_modules dist/
 test: npm test
 exec: /usr/bin/node build/server.js
-port: 8080
-healthcheck: { path: /healthz, timeout_s: 60 }
 env: { NODE_ENV: production }
 ```
 
@@ -102,7 +92,7 @@ Unknown package names fail the gate; the error names them.
 
 1. No secrets, tokens or credentials in files or `env`.
 2. Do not depend on SSH, cloud-init, user-data, or anything a person would do on the instance.
-3. Listen on `0.0.0.0:<port>`; respond 200 on the healthcheck path once ready.
+3. Listen on `0.0.0.0` on the ports SPEC.md defines.
 4. Write only under `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY` or `/tmp`.
 5. `dist/` must be self-contained together with `packages.runtime`; nothing else is installed in
    the AMI.

@@ -4,7 +4,7 @@
   "description": "Packaging contract between the generated app and the pipeline/AMI build. See pipeline/CONTRACT.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "packages", "build", "test", "exec", "port", "healthcheck"],
+  "required": ["name", "packages", "build", "test", "exec"],
   "properties": {
     "name": {
       "type": "string",
@@ -23,16 +23,6 @@
     "build": { "type": "string", "minLength": 1, "description": "Shell command run at the app root in amazonlinux:2023; must produce ./dist." },
     "test": { "type": "string", "minLength": 1, "description": "Shell command; exit 0 = tests pass." },
     "exec": { "type": "string", "pattern": "^/\\S", "description": "Absolute path to the binary plus arguments; cwd is /opt/app (= dist/)." },
-    "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
-    "healthcheck": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["path"],
-      "properties": {
-        "path": { "type": "string", "pattern": "^/", "description": "GET path that returns 200 when the app is ready." },
-        "timeout_s": { "type": "integer", "minimum": 1, "maximum": 600, "default": 60 }
-      }
-    },
     "env": {
       "type": "object",
       "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },

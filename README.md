@@ -120,7 +120,7 @@ This downloads the image if given an S3 URI, writes it to an EBS snapshot with
 `ec2:DescribeSnapshots`, `ec2:RegisterImage` and `s3:GetObject` on the bucket. Launch on a
 NitroTPM-capable instance type (M5/M6/M7, C5/C6/C7, R5/R6/R7, T3/T4g and newer) with a security
 group that allows the app's port. There is no SSH by design; watch `aws ec2 get-console-output` for
-boot and service start, then hit `http://<ip>:<port><healthcheck>`.
+boot and service start, then hit the app on the port and path its SPEC.md defines.
 
 ## The agent
 
