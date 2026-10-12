@@ -10,11 +10,11 @@ The app is installed natively into an Amazon Linux 2023 **Attestable AMI**:
 - The root filesystem is a read-only erofs image protected by dm-verity, with a RAM-backed overlay
   on top. Writes anywhere in the tree succeed but go to memory and vanish on reboot; nothing
   written to the root tree ever persists. Your files live under `/opt/app`, owned by root.
-- The process runs as the unprivileged user `app` with `/opt/app` as working directory; logs go
-  to stdout/stderr (journald). The directories it may write are `/var/lib/<name>` (exposed as
-  `$STATE_DIRECTORY`), `/run/<name>` (`$RUNTIME_DIRECTORY`) and `/tmp`, all inside that RAM
-  overlay. Expect an empty state directory on every boot. Persistent data needs a volume the app
-  mounts itself (see "Privileged system units").
+- The main service runs as a non-root user that the app's own units define (see "systemd units");
+  logs go to stdout/stderr (journald). Its writable scratch space is what systemd gives it
+  (`StateDirectory=` → `$STATE_DIRECTORY`, `RuntimeDirectory=` → `$RUNTIME_DIRECTORY`) plus `/tmp`,
+  all inside that RAM overlay and empty on every boot. Persistent data needs a volume the app mounts
+  itself through one of its units.
 - There is no package manager at run time: the image has no repository configuration and nobody
   can log in. Changing the system means building a new image.
 - There is **no SSH, no SSM agent, no cloud-init, no user-data, no serial login**. Nobody can log in.
@@ -27,6 +27,7 @@ The app is installed natively into an Amazon Linux 2023 **Attestable AMI**:
 ```
 SPEC.md             # the specification; owned by the repository, never edited by the agent
 app.yaml            # this contract, filled in (see below)
+system/*.service    # the app's systemd units; build copies them into dist/system/
 scripts/build.sh    # or any command named in app.yaml "build"
 scripts/test.sh     # or any command named in app.yaml "test"
 README.md           # what the app does, how to run it locally
@@ -42,18 +43,18 @@ packages:
   build: [golang]             # AL2023 dnf packages needed only to build/test
 build: ./scripts/build.sh     # runs at the app root inside amazonlinux:2023; must create ./dist
 test: ./scripts/test.sh       # exit 0 = pass
-exec: /opt/app/todo-api       # absolute path + args; cwd is /opt/app (the contents of dist/)
+units:                        # systemd units, relative to dist/; installed and enabled in the AMI
+  - system/todo-api.service
 ```
 
 | Field | Meaning |
 |---|---|
-| `name` | Image name, systemd unit name and `/var/lib/<name>` |
+| `name` | Image name and S3 path |
 | `packages.runtime` | Packages the app needs at run time. Empty for static binaries |
 | `packages.build` | Packages needed only to build or test. Never enter the AMI |
-| `build` | Must leave **everything** the app needs at run time inside `./dist` (binary, assets, `node_modules`, vendored Python packages…) |
+| `build` | Must leave **everything** the app needs at run time inside `./dist` (binary, assets, `node_modules`, vendored Python packages, the unit files under `dist/system/`) |
 | `test` | Runs after `build` in the same container. Must not need network |
-| `exec` | Becomes `ExecStart=` of the systemd unit. Absolute path, plain arguments, no shell syntax |
-| `system.units` | Optional. Root-run systemd units shipped in `dist/system/`, see "Privileged system units" |
+| `units` | Every systemd unit the app needs, at least its main service. See "systemd units" |
 
 ### Examples
 
@@ -62,20 +63,35 @@ Go (static binary, nothing to install at run time):
 ```yaml
 name: todo-api
 packages: { runtime: [], build: [golang] }
-build: CGO_ENABLED=0 go build -o dist/todo-api ./cmd/todo-api
+build: ./scripts/build.sh     # CGO_ENABLED=0 go build -o dist/todo-api ./cmd/todo-api && cp -r system dist/
 test: go test ./...
-exec: /opt/app/todo-api
+units: [system/todo-api.service]
 ```
 
-Node.js:
+with `system/todo-api.service`:
 
-```yaml
-name: todo-api
-packages: { runtime: [nodejs22], build: [nodejs22-npm] }
-build: npm ci && npm run build && npm ci --omit=dev && rm -rf dist && mkdir dist && cp -r package.json build node_modules dist/
-test: npm test
-exec: /usr/bin/node build/server.js
+```ini
+[Unit]
+Description=todo-api
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/app
+ExecStart=/opt/app/todo-api
+Restart=always
+RestartSec=2
+StateDirectory=todo-api
+
+[Install]
+WantedBy=multi-user.target
 ```
+
+Node.js: `packages: { runtime: [nodejs22], build: [nodejs22-npm] }`, `build` runs `npm ci && npm run build`
+and copies `package.json`, `build/`, `node_modules/` and `system/` into `dist/`,
+`ExecStart=/usr/bin/node /opt/app/build/server.js`.
 
 ### Amazon Linux 2023 package names
 
@@ -96,28 +112,34 @@ Unknown package names fail the gate; the error names them.
 2. Do not depend on SSH, cloud-init, user-data, or anything a person would do on the instance.
 3. Everything written to the root filesystem, including `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY`
    and `/tmp`, lives in RAM and is lost on reboot. Data that must persist belongs on a volume the
-   app mounts itself through one of its system units.
+   app mounts itself through one of its units.
 4. `dist/` must be self-contained together with `packages.runtime`; nothing else is installed in
    the AMI.
 5. `build` may use the network (downloading dependencies); `test` must not.
 6. Log to stdout/stderr.
 
-## Privileged system units (optional)
+## systemd units
 
-Some apps need root work before they start, for example preparing a data volume. List systemd unit
-files under `system.units`; paths are relative to `dist/` and `build` must produce them:
+`units` lists every unit the app needs and `build` copies them into `dist/system/`. The AMI build
+installs each `dist/<path>` as `/etc/systemd/system/<file name>` and enables it. Nothing else is
+generated: the app's units decide who runs what, in which order and with which capabilities. The
+pipeline creates no users.
 
-```yaml
-system:
-  units: [system/my-app-data.service]
-```
+The main service:
 
-For each unit the AMI build installs `dist/<path>` as `/etc/systemd/system/<name>.service`, enables
-it, and adds `Requires=` and `After=` for it to the app's own unit, so the app starts only after
-the unit succeeded. Rules for these units:
+1. Must not run as root. Use `DynamicUser=yes` when the app keeps no persistent data. When it
+   does, use a fixed-uid user created by one of the app's own root units (an idempotent
+   `useradd -r -u <uid> …`), so file ownership on the persistent volume stays the same across
+   boots and across images.
+2. `WorkingDirectory=/opt/app`, `ExecStart=` with an absolute path, `Restart=always`,
+   `StateDirectory=` and `RuntimeDirectory=` for RAM-backed scratch space,
+   `AmbientCapabilities=CAP_NET_BIND_SERVICE` only when it binds a port below 1024,
+   `Requires=`/`After=` on the units it depends on, `WantedBy=multi-user.target`.
 
-1. They run as root (no `User=`). Everything they execute lives under `/opt/app/…` (absolute
-   paths) or comes from `packages.runtime`.
+Units that need root (preparing a data volume, creating users):
+
+1. No `User=`. Everything they execute lives under `/opt/app/…` (absolute paths) or comes from
+   `packages.runtime`.
 2. Idempotent: `Type=oneshot` with `RemainAfterExit=yes`; re-running after success is a no-op.
 3. Fail closed: on any doubt exit non-zero with one log line starting with `REFUSED:`. Never
    destroy or reformat existing data.

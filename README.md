@@ -137,10 +137,9 @@ the app directory.
 agents/                                      agent interface + claude-code implementation
 pipeline/run-pipeline.sh                     checkout base → update → gate → review → [fix → gate → review]×N
 pipeline/gate.sh, gate-in-container.sh       validate / build / test in amazonlinux:2023
-pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow (incl. optional root-run system units)
+pipeline/CONTRACT.md, schema/app.schema.json app.yaml contract the agent must follow (the app ships its own systemd units)
 pipeline/prompts/                            system, update, review, fix prompts
 ami/build-ami.sh, ami/in-container/          KIWI NG build in a privileged amazonlinux:2023 container
-ami/app.service.tmpl                         systemd unit for the generated app
 attest/make-statement.sh                     statement.json = spec sha256 + base commit + PCRs
 scripts/register-ami.sh                      S3 image → snapshot → AMI
 ```

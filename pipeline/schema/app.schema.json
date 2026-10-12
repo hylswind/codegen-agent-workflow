@@ -4,7 +4,7 @@
   "description": "Packaging contract between the generated app and the pipeline/AMI build. See pipeline/CONTRACT.md.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["name", "packages", "build", "test", "exec"],
+  "required": ["name", "packages", "build", "test", "units"],
   "properties": {
     "name": {
       "type": "string",
@@ -22,19 +22,12 @@
     },
     "build": { "type": "string", "minLength": 1, "description": "Shell command run at the app root in amazonlinux:2023; must produce ./dist." },
     "test": { "type": "string", "minLength": 1, "description": "Shell command; exit 0 = tests pass." },
-    "exec": { "type": "string", "pattern": "^/\\S", "description": "Absolute path to the binary plus arguments; cwd is /opt/app (= dist/)." },
-    "system": {
-      "type": "object",
-      "additionalProperties": false,
-      "description": "Optional root-run systemd units the app ships (see CONTRACT.md, 'Privileged system units').",
-      "properties": {
-        "units": {
-          "type": "array",
-          "uniqueItems": true,
-          "items": { "type": "string", "pattern": "^system/[A-Za-z0-9_.-]+\\.service$" },
-          "description": "Unit files relative to dist/; installed to /etc/systemd/system, enabled, and required by the app unit."
-        }
-      }
+    "units": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "pattern": "^system/[A-Za-z0-9_.-]+\\.service$" },
+      "description": "The app's systemd units, relative to dist/; installed to /etc/systemd/system and enabled (see CONTRACT.md, 'systemd units')."
     }
   },
   "definitions": {

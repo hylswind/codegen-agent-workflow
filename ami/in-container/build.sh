@@ -3,7 +3,7 @@
 #   build.sh <handoff-dir> <out-dir>
 # 1. install the latest KIWI NG + NitroTPM tools + AWS's attestable image description
 # 2. copy the description, add the app's runtime packages (keeping every <ignore> entry)
-# 3. overlay dist/ as /opt/app plus the systemd units, enable them
+# 3. overlay dist/ as /opt/app, install and enable the app's systemd units
 # 4. kiwi-ng system build  →  image.raw + pcr_measurements.json
 set -euo pipefail
 
@@ -45,21 +45,14 @@ python3 /work/ami/in-container/customize-description.py "$desc/appliance.kiwi" \
 echo "== adding the app to the root overlay"
 mkdir -p "$desc/root/opt/app" "$desc/root/etc/systemd/system"
 cp -a "$handoff/dist/." "$desc/root/opt/app/"
-# Renders the app unit and any privileged units from app.yaml "system.units";
-# prints the installed system unit names, one per line.
-mapfile -t system_units < <(python3 - "$handoff/app.yaml" "$desc" "$handoff/dist" <<'PY'
-import pathlib, shlex, sys, yaml
+# Installs the units listed in app.yaml "units" from dist/; prints their file names, one per line.
+mapfile -t units < <(python3 - "$handoff/app.yaml" "$desc" "$handoff/dist" <<'PY'
+import pathlib, sys, yaml
 app = yaml.safe_load(open(sys.argv[1]))
 desc = pathlib.Path(sys.argv[2])
 dist = pathlib.Path(sys.argv[3])
-units = (app.get('system') or {}).get('units') or []
-names = [pathlib.Path(u).name for u in units]
-deps = f"Requires={' '.join(names)}\nAfter={' '.join(names)}" if names else ''
-unit = pathlib.Path('/work/ami/app.service.tmpl').read_text()
-unit = (unit.replace('${APP_NAME}', app['name']).replace('${APP_EXEC}', app['exec'])
-            .replace('${APP_SYSTEM_DEPS}', deps))
-(desc / 'root/etc/systemd/system' / f"{app['name']}.service").write_text(unit)
-for u, name in zip(units, names):
+for u in app['units']:
+    name = pathlib.Path(u).name
     dst = desc / 'root/etc/systemd/system' / name
     dst.write_bytes((dist / u).read_bytes())
     dst.chmod(0o644)
@@ -67,16 +60,12 @@ for u, name in zip(units, names):
 PY
 )
 chown -R root:root "$desc/root"
-cat >> "$desc/config.sh" <<EOF
-
-# --- added by codegen-agent-workflow: run the generated app as a service
-useradd -r -s /sbin/nologin -d /opt/app app
-systemctl enable ${app_name}.service
-EOF
-for u in "${system_units[@]}"; do
-  echo "systemctl enable $u" >> "$desc/config.sh"
-done
-echo "system units: ${system_units[*]:-none}"
+{
+  echo
+  echo "# --- added by codegen-agent-workflow: enable the app's units"
+  for u in "${units[@]}"; do echo "systemctl enable $u"; done
+} >> "$desc/config.sh"
+echo "units: ${units[*]}"
 
 echo "== kiwi-ng system build"
 target="$out/build"
