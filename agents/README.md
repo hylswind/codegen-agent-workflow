@@ -1,8 +1,8 @@
 # Agent interface
 
 The workflow and `pipeline/run-pipeline.sh` never call an agent CLI directly. They call two
-scripts under `agents/<name>/`. To add an agent, add a directory with these two scripts and
-select it with the `agent` workflow input. Nothing else changes.
+scripts under `agents/<name>/`. The workflow uses `claude-code`; to switch, add a directory with
+these two scripts and change the agent name in the workflow file. Nothing else changes.
 
 ## `install.sh`
 

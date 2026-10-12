@@ -41,7 +41,8 @@ fi
 jq -r '.result // ""' "$out/transcript.json" > "$out/result.txt" 2>/dev/null || : > "$out/result.txt"
 turns=$(jq '.num_turns // 0' "$out/transcript.json" 2>/dev/null || echo 0)
 cost=$(jq '.total_cost_usd // 0' "$out/transcript.json" 2>/dev/null || echo 0)
-jq -n --arg agent claude-code --arg version "$version" --arg model "${AGENT_MODEL:-default}" \
+model=$(jq -r '(.modelUsage // {} | keys | join(",")) | if . == "" then "unknown" else . end' "$out/transcript.json" 2>/dev/null || echo unknown)
+jq -n --arg agent claude-code --arg version "$version" --arg model "$model" \
       --argjson ok "$ok" --argjson turns "$turns" --argjson cost "$cost" \
       --argjson duration "$duration" --argjson rc "$rc" \
       '{agent:$agent, version:$version, model:$model, ok:$ok, turns:$turns,

@@ -40,7 +40,6 @@ Repository **variables**:
 | `AWS_REGION` | Region of the bucket (and of the AMIs you will register from it). |
 | `S3_BUCKET` | Bucket that receives `image.raw`. |
 | `S3_PREFIX` | Optional key prefix. |
-| `AGENT_MODEL` | Optional model override passed to the agent. |
 
 IAM policy for the upload user:
 
@@ -60,8 +59,12 @@ Actions → **Build attestable AMI from spec** → *Run workflow*, or:
 gh workflow run build-attestable-ami.yml \
   -f repo=https://github.com/<owner>/<app-repo> \
   -f commit=<40-hex commit sha> \
+  -f model=claude-opus-5-5 \      # optional; empty = Claude Code's default model
   -f max_iterations=3
 ```
+
+`model` exists so a newer model can be used without editing the workflow; the model actually
+used is recorded per stage in `pipeline-report.json`.
 
 The app repository must be public and, at that commit, contain `SPEC.md` at the root plus the
 application itself laid out as `pipeline/CONTRACT.md` requires (`app.yaml`, build and test
@@ -119,12 +122,13 @@ NitroTPM-capable instance type (M5/M6/M7, C5/C6/C7, R5/R6/R7, T3/T4g and newer) 
 group that allows the app's port. There is no SSH by design; watch `aws ec2 get-console-output` for
 boot and service start, then hit `http://<ip>:<port><healthcheck>`.
 
-## Swap the agent
+## The agent
 
-Agents live in `agents/<name>/` and expose two scripts, `install.sh` and `run.sh`
-(interface in `agents/README.md`). Add a directory and pass `agent=<name>` to the workflow; the
-workflow file does not change. The pipeline never depends on agent-specific features: every stage
-is a fresh, unattended session whose state is the files in the app directory.
+The workflow uses Claude Code. The agent sits behind a two-script interface in
+`agents/claude-code/` (`install.sh`, `run.sh`; interface in `agents/README.md`) so it can be
+replaced in code with little churn; it is not a run-time choice. The pipeline never depends on
+agent-specific features: every stage is a fresh, unattended session whose state is the files in
+the app directory.
 
 ## Layout
 
