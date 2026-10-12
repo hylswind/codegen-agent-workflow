@@ -49,7 +49,9 @@ rm -f "$out/REVIEW.md"
 cp "$root/pipeline/CONTRACT.md" "$out/CONTRACT.md"
 mkdir -p "$out/.pipeline"
 jq -n --arg repo "$base_repo" --arg commit "$base_commit" '{repo:$repo, commit:$commit}' > "$out/.pipeline/base.json"
-printf 'dist/\n.pipeline/\n' > "$out/.git/info/exclude"
+# Pipeline files stay in the working directory for the agent but out of git, so the history and
+# `git diff <base>..HEAD` contain only changes to the app itself.
+printf 'dist/\n.pipeline/\nCONTRACT.md\nREVIEW.md\n' > "$out/.git/info/exclude"
 
 commit() {
   git -C "$out" add -A >/dev/null
