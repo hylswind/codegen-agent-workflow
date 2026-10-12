@@ -7,15 +7,20 @@ pipeline can build, test and ship it without knowing which language you chose.
 
 The app is installed natively into an Amazon Linux 2023 **Attestable AMI**:
 
-- The root filesystem is read-only (erofs + dm-verity). Your files live under `/opt/app`.
-- The only writable places are `/var/lib/<name>` (exposed to the process as `$STATE_DIRECTORY`),
-  `/run/<name>` (`$RUNTIME_DIRECTORY`) and `/tmp`. They are RAM-backed and lost on reboot.
+- The root filesystem is a read-only erofs image protected by dm-verity, with a RAM-backed overlay
+  on top. Writes anywhere in the tree succeed but go to memory and vanish on reboot; nothing
+  written to the root tree ever persists. Your files live under `/opt/app`, owned by root.
+- The process runs as the unprivileged user `app` with `/opt/app` as working directory; logs go
+  to stdout/stderr (journald). The directories it may write are `/var/lib/<name>` (exposed as
+  `$STATE_DIRECTORY`), `/run/<name>` (`$RUNTIME_DIRECTORY`) and `/tmp`, all inside that RAM
+  overlay. Expect an empty state directory on every boot. Persistent data needs a volume the app
+  mounts itself (see "Privileged system units").
+- There is no package manager at run time: the image has no repository configuration and nobody
+  can log in. Changing the system means building a new image.
 - There is **no SSH, no SSM agent, no cloud-init, no user-data, no serial login**. Nobody can log in.
   The app must start by itself from a systemd unit and configure itself from built-in defaults,
   EC2 instance metadata (IMDS), or what it fetches itself (for example AWS Secrets Manager through
   the instance role). Everything baked into the image is fixed until a new image is built.
-- The process runs as the unprivileged user `app`, with `/opt/app` as working directory, and logs
-  go to stdout/stderr (journald).
 
 ## Required layout
 
@@ -89,12 +94,13 @@ Unknown package names fail the gate; the error names them.
 
 1. No secrets, tokens or credentials in files.
 2. Do not depend on SSH, cloud-init, user-data, or anything a person would do on the instance.
-3. Listen on `0.0.0.0` on the ports SPEC.md defines.
-4. Write only under `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY` or `/tmp`.
-5. `dist/` must be self-contained together with `packages.runtime`; nothing else is installed in
+3. Everything written to the root filesystem, including `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY`
+   and `/tmp`, lives in RAM and is lost on reboot. Data that must persist belongs on a volume the
+   app mounts itself through one of its system units.
+4. `dist/` must be self-contained together with `packages.runtime`; nothing else is installed in
    the AMI.
-6. `build` may use the network (downloading dependencies); `test` must not.
-7. Log to stdout/stderr.
+5. `build` may use the network (downloading dependencies); `test` must not.
+6. Log to stdout/stderr.
 
 ## Privileged system units (optional)
 

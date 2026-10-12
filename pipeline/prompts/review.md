@@ -10,7 +10,7 @@ Check, in this order:
 1. Gate failures and their root cause.
 2. Changes since the base commit: every change must be justified by SPEC.md, a dependency update or a fix. A rewrite of working code, or any edit to SPEC.md, is a blocker.
 3. Spec coverage: every requirement in SPEC.md is implemented and tested.
-4. Contract compliance: app.yaml is correct, dist/ is self-contained, the app listens on 0.0.0.0, no secrets, no reliance on SSH/cloud-init/user-data, writes only to the state directory or /tmp. If app.yaml lists system.units: each unit is idempotent, fails closed with a `REFUSED:` line, never destroys or reformats existing data, and uses absolute paths under /opt/app.
+4. Contract compliance: app.yaml is correct, dist/ is self-contained, no secrets, no reliance on SSH/cloud-init/user-data, nothing that must persist is written to the RAM-backed root tree (state directory, /tmp) instead of a volume the app mounts itself. If app.yaml lists system.units: each unit is idempotent, fails closed with a `REFUSED:` line, never destroys or reformats existing data, and uses absolute paths under /opt/app.
 5. Correctness and security problems that would break the app in production.
 
 Your final answer must be only the review, in exactly this format:
