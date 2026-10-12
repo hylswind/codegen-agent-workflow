@@ -11,8 +11,9 @@ The app is installed natively into an Amazon Linux 2023 **Attestable AMI**:
 - The only writable places are `/var/lib/<name>` (exposed to the process as `$STATE_DIRECTORY`),
   `/run/<name>` (`$RUNTIME_DIRECTORY`) and `/tmp`. They are RAM-backed and lost on reboot.
 - There is **no SSH, no SSM agent, no cloud-init, no user-data, no serial login**. Nobody can log in.
-  The app must start by itself from a systemd unit and configure itself from `env` in `app.yaml`,
-  from EC2 instance metadata (IMDS) if it needs instance details, or from what it fetches itself.
+  The app must start by itself from a systemd unit and configure itself from built-in defaults,
+  EC2 instance metadata (IMDS), or what it fetches itself (for example AWS Secrets Manager through
+  the instance role). Everything baked into the image is fixed until a new image is built.
 - The process runs as the unprivileged user `app`, with `/opt/app` as working directory, and logs
   go to stdout/stderr (journald).
 
@@ -37,8 +38,6 @@ packages:
 build: ./scripts/build.sh     # runs at the app root inside amazonlinux:2023; must create ./dist
 test: ./scripts/test.sh       # exit 0 = pass
 exec: /opt/app/todo-api       # absolute path + args; cwd is /opt/app (the contents of dist/)
-env:                          # optional, non-secret, written to /etc/app/env
-  LOG_LEVEL: info
 ```
 
 | Field | Meaning |
@@ -49,7 +48,6 @@ env:                          # optional, non-secret, written to /etc/app/env
 | `build` | Must leave **everything** the app needs at run time inside `./dist` (binary, assets, `node_modules`, vendored Python packages…) |
 | `test` | Runs after `build` in the same container. Must not need network |
 | `exec` | Becomes `ExecStart=` of the systemd unit. Absolute path, plain arguments, no shell syntax |
-| `env` | Plain `KEY: value` pairs. No secrets |
 | `system.units` | Optional. Root-run systemd units shipped in `dist/system/`, see "Privileged system units" |
 
 ### Examples
@@ -72,7 +70,6 @@ packages: { runtime: [nodejs22], build: [nodejs22-npm] }
 build: npm ci && npm run build && npm ci --omit=dev && rm -rf dist && mkdir dist && cp -r package.json build node_modules dist/
 test: npm test
 exec: /usr/bin/node build/server.js
-env: { NODE_ENV: production }
 ```
 
 ### Amazon Linux 2023 package names
@@ -81,7 +78,7 @@ env: { NODE_ENV: production }
 |---|---|---|---|
 | Go | `golang` | (none) | build with `CGO_ENABLED=0` |
 | Node.js | `nodejs22-npm` | `nodejs22` | copy `node_modules` into `dist/` |
-| Python | `python3.12-pip` | `python3.12` | `pip install --target dist/vendor -r requirements.txt`, set `PYTHONPATH=/opt/app/vendor` in `env` |
+| Python | `python3.12-pip` | `python3.12` | `pip install --target dist/vendor -r requirements.txt`; the app adds `/opt/app/vendor` to `sys.path` |
 | Rust | `cargo`, `rust` | (none) | static binary |
 | Java | `maven`, `java-21-amazon-corretto-devel` | `java-21-amazon-corretto-headless` | ship the jar in `dist/` |
 | C/C++ | `gcc`, `gcc-c++`, `make` | (none unless dynamically linked) | |
@@ -90,7 +87,7 @@ Unknown package names fail the gate; the error names them.
 
 ## Rules
 
-1. No secrets, tokens or credentials in files or `env`.
+1. No secrets, tokens or credentials in files.
 2. Do not depend on SSH, cloud-init, user-data, or anything a person would do on the instance.
 3. Listen on `0.0.0.0` on the ports SPEC.md defines.
 4. Write only under `$STATE_DIRECTORY`, `$RUNTIME_DIRECTORY` or `/tmp`.

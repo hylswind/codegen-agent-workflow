@@ -3,7 +3,7 @@
 #   build.sh <handoff-dir> <out-dir>
 # 1. install the latest KIWI NG + NitroTPM tools + AWS's attestable image description
 # 2. copy the description, add the app's runtime packages (keeping every <ignore> entry)
-# 3. overlay dist/ as /opt/app plus a systemd unit and /etc/app/env, enable the unit
+# 3. overlay dist/ as /opt/app plus the systemd units, enable them
 # 4. kiwi-ng system build  →  image.raw + pcr_measurements.json
 set -euo pipefail
 
@@ -43,9 +43,9 @@ python3 /work/ami/in-container/customize-description.py "$desc/appliance.kiwi" \
   --name "attestable-$app_name" --add-packages "${runtime_pkgs[@]}"
 
 echo "== adding the app to the root overlay"
-mkdir -p "$desc/root/opt/app" "$desc/root/etc/systemd/system" "$desc/root/etc/app"
+mkdir -p "$desc/root/opt/app" "$desc/root/etc/systemd/system"
 cp -a "$handoff/dist/." "$desc/root/opt/app/"
-# Renders the app unit, /etc/app/env and any privileged units from app.yaml "system.units";
+# Renders the app unit and any privileged units from app.yaml "system.units";
 # prints the installed system unit names, one per line.
 mapfile -t system_units < <(python3 - "$handoff/app.yaml" "$desc" "$handoff/dist" <<'PY'
 import pathlib, shlex, sys, yaml
@@ -64,8 +64,6 @@ for u, name in zip(units, names):
     dst.write_bytes((dist / u).read_bytes())
     dst.chmod(0o644)
     print(name)
-env = app.get('env') or {}
-(desc / 'root/etc/app/env').write_text(''.join(f"{k}={shlex.quote(str(v))}\n" for k, v in env.items()))
 PY
 )
 chown -R root:root "$desc/root"

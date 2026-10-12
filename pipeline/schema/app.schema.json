@@ -23,12 +23,6 @@
     "build": { "type": "string", "minLength": 1, "description": "Shell command run at the app root in amazonlinux:2023; must produce ./dist." },
     "test": { "type": "string", "minLength": 1, "description": "Shell command; exit 0 = tests pass." },
     "exec": { "type": "string", "pattern": "^/\\S", "description": "Absolute path to the binary plus arguments; cwd is /opt/app (= dist/)." },
-    "env": {
-      "type": "object",
-      "propertyNames": { "pattern": "^[A-Z_][A-Z0-9_]*$" },
-      "additionalProperties": { "type": ["string", "number", "boolean"] },
-      "description": "Non-secret environment variables written to /etc/app/env."
-    },
     "system": {
       "type": "object",
       "additionalProperties": false,
