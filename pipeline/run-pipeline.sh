@@ -45,7 +45,6 @@ head=$(git -C "$out" rev-parse HEAD)
 [[ $head == "$base_commit" ]] || { echo "fetched $head, expected $base_commit" >&2; exit 2; }
 [[ -s "$out/SPEC.md" ]] || { echo "SPEC.md is missing or empty at $base_commit" >&2; exit 2; }
 
-rm -f "$out/REVIEW.md"
 cp "$root/pipeline/CONTRACT.md" "$out/CONTRACT.md"
 mkdir -p "$out/.pipeline"
 jq -n --arg repo "$base_repo" --arg commit "$base_commit" '{repo:$repo, commit:$commit}' > "$out/.pipeline/base.json"
